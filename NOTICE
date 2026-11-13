@@ -1,0 +1,9 @@
+herdr-setup
+Layout, mods and configuration for Herdr App (https://herdr.dev).
+
+The mods desktop-agents, desktop-changes, desktop-chrome, desktop-files, desktop-menu, desktop-pane,
+desktop-spaces and desktop-tabs started as copies of mods shipped with Herdr App (their mod.json records
+"cloned_from") and have been modified in this repository. Herdr App and its shipped mods are licensed
+under the Apache License, Version 2.0; a copy is in LICENSE.
+
+Everything else in this repository is licensed under the Apache License, Version 2.0 as well.

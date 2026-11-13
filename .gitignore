@@ -1,0 +1,8 @@
+# Editor helpers Herdr writes next to each mod (generated per machine)
+gpui-kit.d.ts
+jsconfig.json
+node_modules/
+# Runtime state and per-person config
+herdr-app/layouts/.state/
+herdr-app/projects.json
+herdr-app/teams/

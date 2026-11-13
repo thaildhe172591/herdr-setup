@@ -1,0 +1,26 @@
+
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude API
+ ▝▝   ▝▝   ~\AppData\Local\Temp\claude\61ed51593d387b25\90f0c4fa-4ffa-4542-a1e2-e84581f06ed7\scratchpad\…
+
+
+❯ Use the AskUserQuestion tool now to ask me one question: which color do I prefer? Options: Red, Blue,
+  Green. Do nothing else.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Color
+
+Which color do you prefer?
+
+❯ 1. Red
+     Red
+  2. Blue
+     Blue
+  3. Green
+     Green
+  4. Type something.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+[hc] only its screen: it is blocked; history is not scrolled in this state
+

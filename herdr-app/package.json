@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Marks the mods and bridge scripts as ES modules for node (tests, status line bridge). Herdr ignores it."
+}

@@ -1,0 +1,11 @@
+{
+  "programs": {
+    "gitbash": {
+      "name": "Git Bash",
+      "icon": "icons/git.svg",
+      "tint": true,
+      "tile": "#f05032",
+      "run": ["gitbash"]
+    }
+  }
+}

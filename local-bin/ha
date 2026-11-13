@@ -1,0 +1,3 @@
+#!/bin/sh
+# ha: open Herdr App at a project (Git Bash). The logic is in ~/.config/herdr-app/bin/ha.ps1 (ha -Help).
+exec pwsh -NoLogo -NoProfile -File "$(cygpath -w "$HOME/.config/herdr-app/bin/ha.ps1")" "$@"
