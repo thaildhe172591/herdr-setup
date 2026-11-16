@@ -404,28 +404,68 @@ export function withoutEnter(prev, cur) {
   return cur;
 }
 
-// --- Claude sessions lost to a reboot / core restart ---
+// --- Agent sessions lost to a reboot / core restart (Claude, Codex, Antigravity) ---
+
+// What the agent-session bridge keeps from a hook's payload: Antigravity sends conversationId, Codex
+// (like Claude) session_id. Ids are typed into a shell later, so only letters, digits and '-' pass.
+const SAFE_ID = /^[A-Za-z0-9-]+$/;
+export const KINDS = ["claude", "codex", "agy"];
+export function sessionRecord(kind, payload, cwd, now) {
+  const session = [payload?.conversationId, payload?.session_id, payload?.sessionId].find((x) => typeof x === "string");
+  if (!KINDS.includes(kind) || !session || session.length < 8 || session.length > 128 || !SAFE_ID.test(session)) return null;
+  return { at: now, kind, session, cwd: typeof payload?.cwd === "string" && payload.cwd ? payload.cwd : cwd };
+}
+// A team record's agent ("claude-haiku" is Claude too) as a session kind.
+export const sessionKind = (agent) => (String(agent ?? "").startsWith("claude") ? "claude" : agent);
 
 // herdr-core gives a lost terminal a shell with the same address, never its program again. A shell
-// whose Claude last wrote its status line before the core started lost that Claude: resume it,
-// unless the person ended it themselves (ended) or it was just resumed (resumed: {session, at, tries}).
-// A resume typed more than a minute ago that didn't bring Claude back is tried once more.
+// whose agent last saved its session before the core started lost that agent: resume it, unless the
+// person ended it themselves (ended) or it was just resumed (resumed: {session, at, tries}).
+// statuses: terminal → {at, session, cwd, kind}; kind claude | codex | agy (Claude when absent).
+// A resume typed more than a minute ago that didn't bring the agent back is tried once more.
 export function lostSessions({ terminals = [], agents = [], statuses = {}, coreStart, ended = {}, resumed = {}, now = Date.now() }) {
-  const running = new Set(agents.filter((a) => a.app === "claude-code").map((a) => a.address));
+  const running = new Set(agents.map((a) => a.address)); // any agent there: never type over it
   const same = (a, b) => String(a ?? "").replace(/[\/]+$/, "").toLowerCase() === String(b ?? "").replace(/[\/]+$/, "").toLowerCase();
   return terminals.flatMap((t) => {
     const s = statuses[t.address];
-    if (!s?.session || running.has(t.address) || !(s.at < coreStart)) return [];
+    if (!s?.session || !SAFE_ID.test(s.session) || running.has(t.address) || !(s.at < coreStart)) return [];
     const r = typeof resumed[t.address] === "string" ? { session: resumed[t.address], at: 0, tries: 1 } : resumed[t.address];
     if (ended[t.address] === s.session || (r?.session === s.session && (r.tries >= 2 || now - r.at < 60000))) return [];
-    return [{ terminal: t.address, session: s.session, cwd: s.cwd ?? t.cwd, cd: !!s.cwd && !same(s.cwd, t.cwd) }];
+    return [{ terminal: t.address, kind: KINDS.includes(s.kind) ? s.kind : "claude", session: s.session, cwd: s.cwd ?? t.cwd, cd: !!s.cwd && !same(s.cwd, t.cwd) }];
   });
 }
 
+// An agent's own command taking a saved session back. Kept in step with team/model.js withResume
+// (a mod cannot import another mod's files; tests/resume.test.mjs checks the two agree).
+export function withResume(argv, kind, session) {
+  if (kind === "codex") return [argv[0], "resume", session, ...argv.slice(1)];
+  if (kind === "agy") return [...argv, "--conversation", session];
+  return [argv[0], "--resume", session, ...argv.slice(1)];
+}
+// The command to resume with: a team member's recorded start command (x.argv, kept by the board),
+// else the kind's plain command. A member without a record still gets what the team started it with:
+// model and effort (Claude, Antigravity), auto mode (Antigravity), no daemon (Codex).
+const setupFlags = (x) => [...(x.model ? ["--model", x.model] : []), ...(x.effort ? ["--effort", x.effort] : [])];
+export function resumeArgv(x) {
+  const kind = x.kind ?? "claude";
+  const base = x.argv?.length ? x.argv
+    : kind === "codex" ? ["codex", ...(x.member ? ["--no-daemon"] : [])]
+    : kind === "agy" ? ["agy", ...(x.member ? ["--mode", "auto"] : []), ...setupFlags(x)]
+    : ["claude", ...setupFlags(x)];
+  return withResume(base, kind, x.session);
+}
 // What to type into that shell (Git Bash and PowerShell 7 both take it).
-// A team member also gets its role's model and effort back (x.model, x.effort: teamSetup).
-const setupFlags = (x) => `${x.model ? ` --model ${x.model}` : ""}${x.effort ? ` --effort ${x.effort}` : ""}`;
-export const resumeCommand = (x) => `${x.cd ? `cd '${x.cwd}' && ` : ""}claude --resume ${x.session}${setupFlags(x)}`;
+export const resumeCommand = (x) => `${x.cd ? `cd '${x.cwd}' && ` : ""}${resumeArgv(x).join(" ")}`;
+
+// A team member's record (role, agent, model, effort, and its start argv once the board kept it);
+// null for a terminal outside every department.
+export function teamMember(teams, address) {
+  for (const t of Object.values(teams ?? {})) {
+    const m = [t?.lead, ...(t?.members ?? [])].find((x) => x?.address === address);
+    if (m) return m;
+  }
+  return null;
+}
 
 // A terminal's model and effort from its department's record (shared "teams"), when it is a member
 // that has them; {} otherwise.
@@ -442,10 +482,13 @@ export function teamSetup(teams, address) {
 // Keys carry no codes. ctrl+c first clears what an earlier broken paste left on the line (a dangling
 // ESC ate the next "c": "laude --resume…"); the caller sends it alone and waits before the rest.
 // null when a key is missing (a cd needs ':'): then paste.
+// hc keys has no '_': a Codex effort (-c model_reasoning_effort=…) is left out of what is typed, and the
+// resumed Codex takes its config's effort.
+export const typedArgv = (argv) => argv.filter((a, i) => !a.includes("_") && !(a === "-c" && argv[i + 1]?.includes("_")));
 export function resumeKeys(x) {
   if (x.cd) return null;
-  const chars = [...`claude --resume ${x.session}${setupFlags(x)}`];
-  if (!chars.every((c) => c === " " || /^[a-z0-9-]$/i.test(c))) return null;
+  const chars = [...typedArgv(resumeArgv(x)).join(" ")];
+  if (!chars.every((c) => c === " " || /^[a-z0-9.=-]$/i.test(c))) return null;
   return ["ctrl+c", ...chars.map((c) => (c === " " ? "space" : c)), "enter"];
 }
 

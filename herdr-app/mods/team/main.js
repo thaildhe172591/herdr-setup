@@ -144,8 +144,8 @@ export default class Team extends View {
       }
       // 3. The team record and its board, which sends each brief once that agent is idle (this
       // dialog may close meanwhile). Each teammate carries its label and aliases, so the composer
-      // can route "@review …" alone.
-      const mate = (r, a) => ({ ...r, label: ROLES[r.role]?.label ?? r.role, aliases: ROLES[r.role]?.mention ?? [], address: a });
+      // can route "@review …" alone, and the command it started with, so a reboot resumes it the same way.
+      const mate = (r, a) => ({ ...r, label: ROLES[r.role]?.label ?? r.role, aliases: ROLES[r.role]?.mention ?? [], address: a, argv: argvFor(r.role, r.agent, r) });
       const team = {
         name, folder, home, tab: tab.id, space: space.id, template: this.tpl.id, layout: this.layout, lanes: this.lanes, laneCheck: this.laneCheck, pace: this.pace, briefed: [],
         lead: mate(this.roles[0], addr[0]),

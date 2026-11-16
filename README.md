@@ -33,6 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 2. Chép `herdr-app\` vào `~\.config\herdr-app`, mẫu agent vào `%APPDATA%\herdr-core\templates`, lệnh `ha` và `herdr-shutdown` vào `~\.local\bin` (thêm vào PATH). File cũ khác bản mới được sao lưu ở `~\.herdr-setup-backup\<giờ>`.
 3. Hỏi thư mục chứa các dự án (ghi vào `~\.config\herdr-app\projects.json`), đặt shell của herdr-core là Git Bash nếu herdr-core chưa có cấu hình.
 4. Hỏi để bật thanh trạng thái Claude Code cho Herdr (context, model, chi phí hiện trên rail và khung chat). Đã có `statusLine` khác thì không đè, chỉ in lệnh để tự sửa.
+5. Nếu máy có Codex hoặc Antigravity: thêm hook báo phiên đang mở (`~.codexhooks.json` kèm `[features] hooks = true`, `~.geminiconfighooks.json`), để sau khi khởi động lại máy mỗi pane mở lại đúng phiên cũ.
 
 Xong thì **tắt hẳn Herdr App rồi mở lại**, chọn layout **desktop** nếu chưa phải layout đang dùng.
 
@@ -52,7 +53,7 @@ Gỡ: chép lại file trong `~\.herdr-setup-backup\<giờ>`, hoặc xoá các m
 
 | Mod | Làm gì |
 |---|---|
-| `composer` | Khung chat dưới các pane, gửi tin cho agent đang chọn; tự mở lại phiên Claude sau khi khởi động lại máy |
+| `composer` | Khung chat dưới các pane, gửi tin cho agent đang chọn; sau khi khởi động lại máy tự mở lại đúng phiên cũ trong từng pane (Claude Code, Codex, Antigravity) |
 | `desktop-chrome`, `desktop-quick`, `desktop-spaces` | Sidebar: thao tác nhanh, danh sách space theo dự án, worktree nằm dưới repo gốc |
 | `desktop-agents` | Danh sách agent theo nhóm hoặc theo độ ưu tiên |
 | `desktop-tabs`, `desktop-pane`, `desktop-menu` | Thanh tab, đầu pane (tách, phóng to, đóng), menu chuột phải |

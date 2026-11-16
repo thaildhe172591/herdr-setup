@@ -179,6 +179,44 @@ if (-not $NoStatusLine -and ((Test-Path -LiteralPath $claudeSettings) -or ($Real
     }
 }
 
+# Codex và Antigravity báo phiên đang mở (bridge\agent-session.mjs) để Herdr mở lại đúng phiên sau khi
+# khởi động lại máy; Claude Code dùng thanh trạng thái ở trên. Chỉ khi agent đó có trên máy.
+$bridge = { param($k) "node $($H -replace '\\', '/')/.config/herdr-app/bridge/agent-session.mjs $k" }
+if ((Test-Path -LiteralPath (Join-Path $TargetHome '.gemini')) -or ($Real -and (Has 'agy'))) {
+    $p = Join-Path $TargetHome '.gemini\config\hooks.json'
+    $j = if (Test-Path -LiteralPath $p) { Get-Content -Raw -LiteralPath $p | ConvertFrom-Json -AsHashtable } else { [ordered]@{} }
+    if ("$($j['herdr-app'].PreInvocation.command)" -eq (& $bridge 'agy')) { Say '  agy hook       đã có' }
+    else {
+        $j['herdr-app'] = [ordered]@{ PreInvocation = @([ordered]@{ type = 'command'; command = (& $bridge 'agy'); timeout = 10 }) }
+        Write-Json $p $j
+        Say '  agy hook       phiên Antigravity → Herdr'
+    }
+}
+if ((Test-Path -LiteralPath (Join-Path $TargetHome '.codex')) -or ($Real -and (Has 'codex'))) {
+    $p = Join-Path $TargetHome '.codex\hooks.json'
+    $j = if (Test-Path -LiteralPath $p) { Get-Content -Raw -LiteralPath $p | ConvertFrom-Json -AsHashtable } else { [ordered]@{} }
+    if (-not $j.hooks) { $j.hooks = [ordered]@{} }
+    $starts = @($j.hooks.SessionStart | Where-Object { $_ })
+    if (@($starts | ForEach-Object { $_.hooks } | Where-Object { "$($_.command)" -like '*agent-session.mjs*' }).Count) { Say '  codex hook     đã có' }
+    else {
+        $j.hooks.SessionStart = $starts + @([ordered]@{ hooks = @([ordered]@{ type = 'command'; command = (& $bridge 'codex'); timeout = 10 }) })
+        Write-Json $p $j
+        Say '  codex hook     phiên Codex → Herdr'
+    }
+    # Codex chạy hook chỉ khi bật tính năng hooks.
+    $cfg = Join-Path $TargetHome '.codex\config.toml'
+    $toml = if (Test-Path -LiteralPath $cfg) { [IO.File]::ReadAllText($cfg) } else { '' }
+    if ($toml -notmatch '(?m)^\s*hooks\s*=\s*true') {
+        $toml = if ($toml -match '(?m)^\[features\]\s*$') { $toml -replace '(?m)^\[features\]\s*$', "[features]`nhooks = true" } else { $toml.TrimEnd() + "`n`n[features]`nhooks = true`n" }
+        if (-not $DryRun) {
+            if (Test-Path -LiteralPath $cfg) { $null = New-Item -ItemType Directory -Force -Path $Backup; Copy-Item -LiteralPath $cfg -Destination (Join-Path $Backup 'codex-config.toml') }
+            New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
+            [IO.File]::WriteAllText($cfg, $toml, $utf8)
+        }
+        Say '  codex config   [features] hooks = true'
+    }
+}
+
 # 4. Còn lại -----------------------------------------------------------------------------------------
 Say "`n3. Còn lại" Cyan
 $font = @('HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts', 'HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Fonts') |

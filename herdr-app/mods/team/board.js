@@ -6,7 +6,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
 import { spaces, panes, agents, terminals, run, hc, exec, theme, settings, shared, setShared, props, openOverlay, appHome, home, readTextFile, writeTextFile, watchFolder } from "herdr";
 import * as fsp from "fs/promises";
-import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt } from "./model.js";
+import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt, memberArgv, withResume, sessionKind, typedArgv } from "./model.js";
 import { I, CHROME, PACE_ICON, roleTone, logo, icon, button, iconButton, tile, openInCode } from "./ui.js";
 import { L } from "./i18n.js";
 
@@ -168,6 +168,20 @@ async function scanBare(v, cx) {
     if (await atShellPrompt(m.address)) bare.add(m.address);
   }
   if (bare.size !== v.bare.size || [...bare].some((a) => !v.bare.has(a))) { v.bare = bare; cx.notify(); }
+  // Each member's start command in the team record: the composer, which cannot import this mod,
+  // resumes a lost member after a reboot with these flags (sandbox, auto mode, model, effort).
+  if ([team.lead, ...team.members].some((m) => m?.address && !Array.isArray(m.argv))) {
+    const withArgv = (m) => (m && !Array.isArray(m.argv) ? { ...m, argv: memberArgv(m) } : m);
+    updateTeam(v, (x) => ({ lead: withArgv(x.lead), members: (x.members ?? []).map(withArgv) }));
+  }
+}
+// The session a member's agent saved before it stopped (Claude's status line, the agent-session hook
+// of Codex and Antigravity), when it is of the member's own kind; null otherwise.
+async function savedSession(m) {
+  const kind = sessionKind(m.agent), file = String(m.address).replace(/[^\w.-]/g, "_");
+  const read = async (dir) => { try { return JSON.parse(await readTextFile(`${home()}\\AppData\\Local\\${dir}\\${file}.json`)); } catch { return null; } };
+  const s = kind === "claude" ? (await read("herdr-claude"))?.input?.session_id : ((a) => (a?.kind === kind ? a.session : null))(await read("herdr-agents"));
+  return typeof s === "string" && /^[A-Za-z0-9-]+$/.test(s) ? s : null;
 }
 // A terminal whose shell sits at its own prompt: the shell in front (hc get) and, since herdr-core
 // reports the shell even while an agent runs in it, a shell prompt on the screen's last line.
@@ -177,20 +191,24 @@ async function atShellPrompt(address) {
   const s = await hc(["read", address]).catch(() => null);
   return s?.code === 0 && shellPrompt(s.stdout);
 }
-// Starts a stopped member again with its role's command (typed key by key: a paste's bracket codes
-// reached restored shells as text), then lets briefPending send its brief once it is idle.
+// Starts a stopped member again (typed key by key: a paste's bracket codes reached restored shells as
+// text): back into the session it saved when there is one (it keeps its brief and its work), else
+// fresh with its role's command, and then briefPending sends its brief once it is idle.
 async function restartMember(v, cx, m) {
   const label = ROLES[m.role]?.label ?? m.label ?? m.role;
   if (!(await atShellPrompt(m.address))) return flash(v, cx, L(`${label}: terminal không ở dấu nhắc shell, không gõ gì`, `${label}: the terminal isn't at a shell prompt; nothing typed`), true);
-  const cmd = restartCommand(m);
-  const keys = typeKeys(cmd);
+  const session = await savedSession(m);
+  const argv = session ? withResume(Array.isArray(m.argv) ? m.argv : memberArgv(m), sessionKind(m.agent), session) : memberArgv(m);
+  const cmd = argv.join(" ");
+  const keys = typeKeys(cmd) ?? (session ? typeKeys(typedArgv(argv).join(" ")) : null);
   await hc(["keys", m.address, "--", "ctrl+c"]).catch(() => {}); // clears what a broken paste left
   await cx.sleep(500);
   const r = await (keys ? hc(["keys", m.address, "--", ...keys.slice(1)]) : hc(["send", "--force", m.address, cmd])).catch(() => ({ code: 1 }));
   if (r?.code !== 0) return flash(v, cx, L(`Không khởi động lại được ${label}`, `Couldn't restart ${label}`), true);
+  v.bare.delete(m.address);
+  if (session) return flash(v, cx, L(`Đã mở lại phiên cũ của ${label}`, `Resumed ${label}'s previous session`));
   // A fresh agent needs its brief again (an older team without the list briefs whoever it saw starting).
   updateTeam(v, (x) => (Array.isArray(x.briefed) ? { briefed: x.briefed.filter((a) => a !== m.address) } : {}));
-  v.bare.delete(m.address);
   flash(v, cx, L(`Đã khởi động lại ${label}: lời dặn sẽ gửi khi nó sẵn sàng`, `Restarted ${label}: its brief goes out once it is ready`));
 }
 // The handoff files' modified times (ms), once per team (its first relay); {} when node can't tell.

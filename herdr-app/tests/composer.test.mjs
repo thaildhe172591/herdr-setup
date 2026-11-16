@@ -101,8 +101,8 @@ test("lostSessions: shells whose Claude stopped before herdr-core started (reboo
   const now = 5_000_000;
   const got = lostSessions({ terminals, agents, statuses, coreStart, ended: { t4: "s4" }, resumed: { t6: { session: "s6", at: now - 1000, tries: 1 } }, now });
   assert.deepEqual(got, [
-    { terminal: "t1", session: "s1", cwd: "D:\Acme", cd: false },
-    { terminal: "t3", session: "s3", cwd: "D:\Acme\Deep", cd: true },
+    { terminal: "t1", kind: "claude", session: "s1", cwd: "D:\Acme", cd: false },
+    { terminal: "t3", kind: "claude", session: "s3", cwd: "D:\Acme\Deep", cd: true },
   ]);
   assert.equal(resumeCommand(got[0]), "claude --resume s1");
   assert.equal(resumeCommand(got[1]), "cd 'D:\Acme\Deep' && claude --resume s3");

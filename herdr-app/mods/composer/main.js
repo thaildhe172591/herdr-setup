@@ -12,7 +12,7 @@ import { agents, focused, spaces, panes, terminals, knownAgents, run, hc, exec, 
 import {
   kindOf, insertText, targetTerminal, altVTarget, summarize, tokens, span, ctxTone, ACTIONS, withCustom, actionsFor, actionState, shouldSend, resetLabel,
   MODELS, EFFORTS, MODES, modelKey, effortLabel, modeOf, pickTargets, bySpace, composerPx, withoutEnter,
-  lostSessions, resumeCommand, resumeKeys, atPrompt, teamSetup, shellPrompt, routeMention,
+  lostSessions, resumeCommand, resumeKeys, atPrompt, teamSetup, teamMember, sessionKind, shellPrompt, routeMention,
   agentKind, parseCodexModels, parseAgyModels, modelsFor, effortsFor, modelCommand, effortCommand, codexFooter, agyFooter, currentModel,
   AGY_MODES, agyModeSteps, agyModeOf, CODEX_PERMS, codexStatus, agyUsage,
 } from "./model.js";
@@ -131,7 +131,7 @@ export default class Composer extends View {
     const poll = (cx) => cx.spawn(async (cx) => { this.watchEnded(); if (await this.readStatus()) cx.notify(); });
     poll(cx);
     cx.timer.every(4000, poll);
-    // Claude sessions lost to a reboot come back in their panes (twice: terminals may list late).
+    // Agent sessions (Claude, Codex, Antigravity) lost to a reboot come back in their panes (twice: terminals may list late).
     for (const ms of [2500, 15000]) cx.timer.after(ms, (cx) => cx.spawn(async (cx) => { await this.resumeLost(cx); cx.notify(); }));
     // A resume that didn't bring Claude back gets one more try a minute later (lostSessions).
     cx.timer.every(60000, (cx) => cx.spawn(async (cx) => { await this.resumeLost(cx); cx.notify(); }));
@@ -155,17 +155,15 @@ export default class Composer extends View {
     this.text.on("paste_other", (_e, cx) => cx.spawn(async (cx) => { await this.paste(false); cx.notify(); }));
   }
 
-  // A Claude that disappears while its terminal lives was ended by the person (/exit, Ctrl+C):
-  // remember its session so a later reboot doesn't bring it back.
+  // An agent (Claude, Codex, Antigravity) that disappears while its terminal lives was ended by the
+  // person (/exit, Ctrl+C): remember its session so a later reboot doesn't bring it back.
   watchEnded() {
     const live = new Set(terminals().filter((t) => t.state === "live").map((t) => t.address));
-    const now = new Set(agents().filter((a) => a.app === "claude-code").map((a) => a.address));
+    const now = new Set(agents().map((a) => a.address));
     const gone = this.prevClaude ? [...this.prevClaude].filter((a) => !now.has(a) && live.has(a)) : [];
     this.prevClaude = now;
     if (!gone.length) return;
-    Promise.all(gone.map(async (t) => {
-      try { return [t, JSON.parse(await readTextFile(this.statusPath(t)))?.input?.session_id]; } catch { return [t, null]; }
-    })).then((pairs) => {
+    Promise.all(gone.map(async (t) => [t, (await this.savedSession(t))?.session ?? null])).then((pairs) => {
       const ended = { ...(shared("claude.ended") ?? {}) };
       for (const [t, s] of pairs) if (s) ended[t] = s;
       setShared("claude.ended", ended);
@@ -173,9 +171,19 @@ export default class Composer extends View {
   }
 
   statusPath(t) { return `${home()}\\AppData\\Local\\herdr-claude\\${t.replace(/[^\w.-]/g, "_")}.json`; }
+  agentPath(t) { return `${home()}\\AppData\\Local\\herdr-agents\\${t.replace(/[^\w.-]/g, "_")}.json`; }
+  // The newest session a terminal's agent saved: Claude's from its status line (herdr-claude), Codex's
+  // and Antigravity's from their hooks (bridge/agent-session.mjs → herdr-agents). null when none.
+  async savedSession(t) {
+    const read = async (p) => { try { return JSON.parse(await readTextFile(p)); } catch { return null; } };
+    const c = await read(this.statusPath(t)), a = await read(this.agentPath(t));
+    const claude = c?.input?.session_id ? { at: c.at ?? 0, kind: "claude", session: c.input.session_id, cwd: c.input.cwd ?? null } : null;
+    const other = a?.session ? { at: a.at ?? 0, kind: a.kind, session: a.session, cwd: a.cwd ?? null } : null;
+    return claude && other ? (other.at > claude.at ? other : claude) : claude ?? other;
+  }
 
-  // Types `claude --resume <its session>` into each shell whose Claude stopped before herdr-core
-  // started (a reboot or a core restart). Once per core start.
+  // Types each lost agent's resume (claude --resume, codex resume, agy --conversation) into its shell
+  // when the agent stopped before herdr-core started (a reboot or a core restart). Once per core start.
   async resumeLost(cx) {
     if (this.resuming) return;
     this.resuming = true;
@@ -186,12 +194,7 @@ export default class Composer extends View {
       const coreStart = Date.now() - up;
       const terms = terminals().filter((t) => t.state === "live" && !String(t.address).includes("/") && t.labels?.["herdr.space"]);
       const statuses = {};
-      for (const t of terms) {
-        try {
-          const j = JSON.parse(await readTextFile(this.statusPath(t.address)));
-          statuses[t.address] = { at: j?.at ?? null, session: j?.input?.session_id ?? null, cwd: j?.input?.cwd ?? null };
-        } catch {}
-      }
+      for (const t of terms) { const s = await this.savedSession(t.address); if (s) statuses[t.address] = s; }
       // "resumed" belongs to one core start: a later reboot may resume the same session again.
       const prev = shared("claude.resumed");
       const resumed = prev && Math.abs((prev.coreStart ?? 0) - coreStart) < 60000 ? { ...prev.map } : {};
@@ -206,7 +209,10 @@ export default class Composer extends View {
         // herdr-core reports the shell in front even while an agent runs in it: the screen decides too.
         const screen = await hc(["read", x.terminal]).catch(() => null);
         if (screen?.code !== 0 || !shellPrompt(screen.stdout)) continue;
-        Object.assign(x, teamSetup(shared("teams"), x.terminal)); // a team member: its role's model and effort
+        // A team member resumes with its role's flags: the start argv the board kept, else model and effort.
+        const member = teamMember(shared("teams"), x.terminal);
+        if (member) Object.assign(x, teamSetup(shared("teams"), x.terminal), { member: true },
+          Array.isArray(member.argv) && sessionKind(member.agent) === x.kind ? { argv: member.argv } : {});
         const keys = resumeKeys(x);
         let r;
         if (keys) {
@@ -221,9 +227,9 @@ export default class Composer extends View {
       }
       setShared("claude.resumed", { coreStart, map: resumed });
       const names = done.map((t) => { const a = terms.find((x) => x.address === t); return a?.labels?.where ?? t; });
-      if (done.length) this.flash(cx, "ok", L(`Đã mở lại ${done.length} phiên Claude sau khi khởi động lại: ${names.join(" · ")}`, `Resumed ${done.length} Claude ${done.length === 1 ? "session" : "sessions"} after the restart: ${names.join(" · ")}`));
+      if (done.length) this.flash(cx, "ok", L(`Đã mở lại ${done.length} phiên agent sau khi khởi động lại: ${names.join(" · ")}`, `Resumed ${done.length} agent ${done.length === 1 ? "session" : "sessions"} after the restart: ${names.join(" · ")}`));
     } catch (e) {
-      this.flash(cx, "error", L(`Không mở lại được phiên Claude: ${String(e?.message ?? e)}`, `Couldn't resume the Claude session: ${String(e?.message ?? e)}`));
+      this.flash(cx, "error", L(`Không mở lại được phiên agent: ${String(e?.message ?? e)}`, `Couldn't resume the agent session: ${String(e?.message ?? e)}`));
     } finally { this.resuming = false; }
   }
 

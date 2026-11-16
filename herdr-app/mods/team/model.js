@@ -397,8 +397,21 @@ export function parseHandoff(text, fallback = null) {
 // with its role's command. typeKeys types it with `hc keys` (a paste's bracket codes reached restored
 // shells as text): ctrl+c first, sent alone by the caller; null when a character has no key ('_', ':',
 // '&', '"'): then paste. atPrompt: only a terminal whose shell itself is in front (hc get).
-export const restartCommand = (m) => argvFor(m.role, m.agent, { ...defaultSetup(m.role, m.agent),
-  ...Object.fromEntries(["model", "effort"].filter((k) => m[k] !== undefined).map((k) => [k, m[k]])) }).join(" ");
+export const memberArgv = (m) => argvFor(m.role, m.agent, { ...defaultSetup(m.role, m.agent),
+  ...Object.fromEntries(["model", "effort"].filter((k) => m[k] !== undefined).map((k) => [k, m[k]])) });
+export const restartCommand = (m) => memberArgv(m).join(" ");
+
+// A member that saved a session (Claude's status line, the agent-session hook for Codex and
+// Antigravity) comes back to it instead of starting fresh: its own command plus the resume flag.
+// Kept in step with composer/model.js withResume (a mod cannot import another mod's files).
+export function withResume(argv, kind, session) {
+  if (kind === "codex") return [argv[0], "resume", session, ...argv.slice(1)];
+  if (kind === "agy") return [...argv, "--conversation", session];
+  return [argv[0], "--resume", session, ...argv.slice(1)];
+}
+export const sessionKind = (agent) => (String(agent ?? "").startsWith("claude") ? "claude" : agent);
+// What `hc keys` can type: it has no '_', so a Codex effort (-c model_reasoning_effort=…) stays out.
+export const typedArgv = (argv) => argv.filter((a, i) => !a.includes("_") && !(a === "-c" && argv[i + 1]?.includes("_")));
 export function typeKeys(text) {
   const chars = [...String(text)];
   if (!chars.every((c) => c === " " || /^[a-z0-9.='-]$/i.test(c))) return null;
