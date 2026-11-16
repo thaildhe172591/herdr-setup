@@ -523,17 +523,18 @@ export default class Spaces extends View {
       );
   }
 
-  // The space's department (mod "team"; by space, else by folder): green with its live agents
-  // while it runs, grey once it has stopped. Click: its board.
+  // The space's departments (mod "team"; by space, else by folder; a space can hold several): green with
+  // their live agents while they run, grey once they have stopped. Click: the board, or the list of them.
   deptBadge(w, t) {
     const teams = shared("teams") ?? {};
     const tabs = new Set(w.tabs.map((x) => x.id));
     const dir = (s) => String(s ?? "").replace(/[\\/]+$/, "").toLowerCase();
     const here = dir(panes().find((p) => tabs.has(p.tab) && p.cwd)?.cwd || w.folder);
-    const team = teams[w.id] ?? (here ? Object.values(teams).find((x) => dir(x?.folder) === here) : null);
-    if (!team) return div();
+    const depts = Object.entries(teams).filter(([k, x]) => k === w.id || x?.space === w.id || (here && dir(x?.folder) === here)).map(([key, x]) => ({ ...x, key }));
+    if (!depts.length) return div();
+    const team = depts.length === 1 ? depts[0] : { name: depts.map((x) => x.name).join(", ") };
     const live = new Set(terminals().map((x) => x.address));
-    const all = [team.lead, ...(team.members ?? [])].filter(Boolean);
+    const all = depts.flatMap((x) => [x.lead, ...(x.members ?? [])]).filter(Boolean);
     const alive = all.filter((m) => live.has(m.address)).length;
     const tone = alive ? t.ansi2 : t.dim;
     return h_flex().id(`dept-${w.id}`).flex_none().h(18).px(alive ? 5 : 3).gap(3).items_center().rounded(5).cursor_pointer()
@@ -545,10 +546,13 @@ export default class Spaces extends View {
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => {
         cx.stop_propagation();
-        const pane = panes().find((p) => p.mod === "team" && tabs.has(p.tab));
         run("space.select", { id: w.id });
-        if (pane) run("tab.select", { id: pane.tab });
-        else run("tab.new", { space: w.id, name: "Bảng việc", mod: "team", props: { view: "board", space: w.id } });
+        // Several departments: the list of them (each opens its own board).
+        if (depts.length > 1) return openOverlay({ mod: "team", kind: "dialog", width: 560, height: 720 });
+        const d = depts[0], own = `Bảng việc · ${d.name}`.slice(0, 40);
+        const tab = w.tabs.find((x) => x.name === own) ?? (d.key === d.space ? w.tabs.find((x) => x.name === "Bảng việc") : null);
+        if (tab) run("tab.select", { id: tab.id });
+        else run("tab.new", { space: w.id, name: own, mod: "team", props: { view: "board", space: w.id, team: d.key } });
       })
       .child(svg("mods/team/icons/users.svg").size(11).text_color(tone))
       .when(alive > 0, (el) => el.child(div().text_size(10.5).text_color(tone).child(String(alive))));

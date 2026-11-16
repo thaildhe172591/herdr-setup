@@ -36,8 +36,10 @@ export default class DesktopQuick extends View {
           .when(blocked > 0, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1400 })) // native, as the status bar's dot
       : null;
 
-    const team = (shared("teams") ?? {})[spaces().find((x) => x.active)?.id];
-    const alive = team ? [team.lead, ...team.members].filter((m) => all.some((a) => a.address === m?.address)).length : 0;
+    // Live members of every department in this space (it may hold several).
+    const sid = spaces().find((x) => x.active)?.id;
+    const alive = Object.entries(shared("teams") ?? {}).filter(([k, x]) => k === sid || x?.space === sid)
+      .flatMap(([, x]) => [x.lead, ...(x.members ?? [])]).filter((m) => all.some((a) => a.address === m?.address)).length;
     const teamBadge = alive
       ? div().px(6).h(16).flex().items_center().rounded(8).text_size(10.5).font_bold().bg(t.accent + "26").text_color(t.accent).child(String(alive))
       : null;

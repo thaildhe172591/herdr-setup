@@ -307,6 +307,29 @@ const fold = (s) => String(s ?? "").normalize("NFD").replace(/\p{M}/gu, "").repl
 // The team's folder name under ~app\teams (task cards, NOTES.md).
 export const teamSlug = (name) => fold(name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "team";
 
+// --- Several departments in one space, each its own unit: record, task folder, board tab, lanes ---
+// A new department is kept in shared "teams" under its name's slug (one made before several could
+// share a space keeps its space's id). The slug also names its task folder, so a name is taken when any
+// department, in any space, has the same slug: their cards would mix.
+export const teamKey = (name) => teamSlug(name);
+export const nameTaken = (teams, name) => Object.entries(teams ?? {}).some(([key, t]) => key === teamSlug(name) || teamSlug(t?.name ?? "") === teamSlug(name));
+// The first free name from a base: "X", else "X 2", "X 3"…
+export function freeName(teams, base) {
+  if (!nameTaken(teams, base)) return base;
+  for (let i = 2; ; i++) if (!nameTaken(teams, `${base} ${i}`)) return `${base} ${i}`;
+}
+// A department's board tab. One kept under its space's id also owns that space's plain "Bảng việc".
+export const boardTabName = (team) => `Bảng việc · ${team?.name ?? ""}`.slice(0, 40);
+export const ownsPlainBoard = (team) => !!team && team.key === team.space;
+// The department a pane or agent belongs to, with its key: the one that has it as a member, else the
+// one whose tab it is in, else its space's first. null when none.
+export function deptOf(teams, { address, tab, space } = {}) {
+  const all = Object.entries(teams ?? {}).map(([key, t]) => ({ ...t, key }));
+  return all.find((t) => address && [t.lead, ...(t.members ?? [])].some((m) => m?.address === address))
+    ?? all.find((t) => tab && t.tab === tab)
+    ?? all.find((t) => space && (t.key === space || t.space === space)) ?? null;
+}
+
 // The board's columns. A card's status folds onto one of these (English words too); unknown → Chờ.
 export const COLUMNS = [
   { id: "cho", get label() { return L("Chờ", "To do"); }, alias: ["todo", "moi", "new"] },

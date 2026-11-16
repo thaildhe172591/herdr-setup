@@ -4,9 +4,9 @@ import { spaces, panes, run, openOverlay, theme, window, shared, layout, setting
 import { L, setLang } from "./i18n.js";
 
 // Tabs the custom mods name when they make them keep that name; shown in the interface language.
-const TEAM = "Phòng ban · ";
+const TEAM = "Phòng ban · ", BOARD = "Bảng việc · ";
 const tabLabel = (n) => n === "Bảng việc" ? L("Bảng việc", "Board") : n === "Files" ? L("Tệp", "Files") : n === "Changes" ? L("Thay đổi", "Changes")
-  : n?.startsWith(TEAM) ? L(n, `Team · ${n.slice(TEAM.length)}`) : n;
+  : n?.startsWith(TEAM) ? L(n, `Team · ${n.slice(TEAM.length)}`) : n?.startsWith(BOARD) ? L(n, `Board · ${n.slice(BOARD.length)}`) : n;
 
 function find(node, id) {
   if (node?.id === id) return node;

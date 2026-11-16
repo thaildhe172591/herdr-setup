@@ -8,7 +8,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, agents, terminals, run, hc, exec, theme, shared, setShared, props, closeOverlay, nextCommand, appHome, readTextFile, writeTextFile } from "herdr";
 import * as fsp from "fs/promises";
-import { TEMPLATES, AGENT_KINDS, ROLES, LAYOUTS, MODELS, EFFORTS, PACES, LANE_CHECKS, argvFor, defaultSetup, trustAnswer, teamSlug, layoutTree, splitPlan } from "./model.js";
+import { TEMPLATES, AGENT_KINDS, ROLES, LAYOUTS, MODELS, EFFORTS, PACES, LANE_CHECKS, argvFor, defaultSetup, trustAnswer, teamSlug, layoutTree, splitPlan, teamKey, nameTaken, freeName } from "./model.js";
 import { I, CHROME, ROLE_ICON, TEMPLATE_ICON, PACE_ICON, logo, icon, button, iconButton, tile, setupText } from "./ui.js";
 import { boardInit, boardRender, openBoard, place } from "./board.js";
 import { overviewInit, overviewRender } from "./overview.js";
@@ -34,12 +34,14 @@ export default class Team extends View {
     setLang(shared("lang"));
     const p = props() ?? {};
     this.isBoard = p.view === "board";
+    this.teamKey = p.team ?? null; // a board's department (several can share a space); the dialog sets it once it creates one
     this.space = this.isBoard ? spaces().find((s) => s.id === p.space) ?? null : spaces().find((s) => s.active) ?? null;
     this.trust = {}; // address → the key that answers its "trust this folder?" prompt
     this.handle = cx.focus_handle();
     // Agents not idle yet may be asking to trust the folder: look at their screens every 2 s.
     cx.timer.every(2000, (cx) => cx.spawn(async (cx) => {
-      const team = (shared("teams") ?? {})[this.space?.id];
+      const teams = shared("teams") ?? {};
+      const team = teams[this.teamKey] ?? (this.isBoard ? teams[this.space?.id] : null);
       const running = new Set(terminals().map((x) => x.address));
       const addrs = [...new Set([...(this.addr ?? []), ...(team ? [team.lead, ...team.members].map((m) => m?.address) : [])])].filter((a) => a && running.has(a));
       let changed = false;
@@ -68,7 +70,7 @@ export default class Team extends View {
     this.pace = PACES.some((p) => p.id === shared("team.pace")) ? shared("team.pace") : "chuan"; // the last one picked
     this.laneCheck = LANE_CHECKS.some((k) => k.id === shared("team.laneCheck")) ? shared("team.laneCheck") : "qa"; // the last one picked
     this.name = InputState.new({ placeholder: L("Tên phòng ban", "Team name") });
-    this.name.set_value(this.space?.name ?? L("Phòng ban", "Team"));
+    this.name.set_value(freeName(shared("teams"), this.space?.name ?? L("Phòng ban", "Team")));
     this.handle.focus();
     this.steps = null; // while creating: [{state: "wait"|"run"|"need"|"ok"|"err", note}]
     // Every department first when there are any ("Phòng ban mới" there switches to the form).
@@ -109,6 +111,7 @@ export default class Team extends View {
     if (!space || space.machine) return;
     const folder = place(space);
     const name = this.name.value().trim() || space.name;
+    if (nameTaken(shared("teams"), name)) { cx.notify(); return; } // the form says why and keeps Create off
     // The team's own folder (task cards, NOTES.md), outside the repo.
     const home = `${appHome()}\\teams\\${teamSlug(name)}`;
     try {
@@ -151,11 +154,14 @@ export default class Team extends View {
         lead: mate(this.roles[0], addr[0]),
         members: this.roles.slice(1).map((r, i) => mate(r, addr[i + 1])).filter((m) => m.address),
       };
-      setShared("teams", { ...(shared("teams") ?? {}), [space.id]: team });
+      // Its own key: the space may hold other departments, each a unit with its own board and folder.
+      const key = teamKey(name);
+      setShared("teams", { ...(shared("teams") ?? {}), [key]: team });
+      this.teamKey = key;
       this.team = team;
       this.addr = addr;
       this.doneAt = Date.now();
-      openBoard(team);
+      openBoard({ ...team, key });
       this.done = true;
     } catch (e) {
       const i = this.steps.findIndex((s) => s.state === "run");
@@ -170,7 +176,7 @@ export default class Team extends View {
   liveStep(s, i) {
     const a = this.addr?.[i];
     if (!this.done || s.state === "err" || !a) return s;
-    if ((shared("teams") ?? {})[this.space?.id]?.briefed?.includes(a)) return { state: "ok", note: L(`${a} · đã nhận lời dặn`, `${a} · brief received`) };
+    if ((shared("teams") ?? {})[this.teamKey]?.briefed?.includes(a)) return { state: "ok", note: L(`${a} · đã nhận lời dặn`, `${a} · brief received`) };
     if (this.trust[a]) return { state: "need", note: L("hỏi tin tưởng thư mục", "asks to trust the folder") };
     const ag = agents().find((x) => x.address === a);
     if (ag?.status === "blocked" || (!ag && Date.now() - this.doneAt > 15000)) return { state: "need", note: L("đang chờ bạn trả lời trong pane", "waiting for your answer in the pane") };
@@ -192,7 +198,8 @@ export default class Team extends View {
     if (this.view === "list") return overviewRender(this, cx);
     const t = theme();
     const space = this.space;
-    const ok = !!space && !space.machine;
+    const taken = nameTaken(shared("teams"), this.name.value().trim() || space?.name || "");
+    const ok = !!space && !space.machine && !taken;
     const label = (s) => div().pt(16).pb(7).text_size(11.5).text_color(t.dim).child(s);
     const roleTile = (path) => h_flex().size(30).flex_none().items_center().justify_center().rounded(8).bg(t.background).child(icon(path, 15, t.muted));
     const roleText = (r, sub, color) => v_flex().flex_1().min_w(0).gap(1)
@@ -223,7 +230,8 @@ export default class Team extends View {
 
     const form = v_flex()
       .child(label(L("Tên", "Name")))
-      .child(h_flex().h(34).px(11).items_center().rounded(8).border_1().border_color(t.input).bg(t.background).child(Input.new(this.name).w_full().text_size(12.5)))
+      .child(h_flex().h(34).px(11).items_center().rounded(8).border_1().border_color(taken ? t.blocked : t.input).bg(t.background).child(Input.new(this.name).w_full().text_size(12.5)))
+      .when(taken, (el) => el.child(div().pt(5).text_size(11.5).text_color(t.blocked).child(L("Đã có phòng ban tên này (mỗi phòng ban một tên riêng, kể cả ở space khác). Đặt tên khác.", "A team with this name already exists (each team needs its own name, in any space). Pick another name."))))
       .child(label(L("Mẫu đội", "Template")))
       .child(h_flex().p(3).gap(3).rounded(10).bg(t.background).children(TEMPLATES.map((tp) => {
         const on = this.tpl.id === tp.id;
@@ -342,6 +350,6 @@ export default class Team extends View {
         .child(h_flex().flex_1().min_w(0).gap(6).items_center().child(icon(I("shield-check"), 13, t.dim)).child(div().truncate().text_size(11).text_color(t.dim).child(hint)))
         .child(button(t, "t-cancel", this.done ? L("Đóng", "Close") : L("Huỷ", "Cancel"), () => this.close()))
         .when(!this.steps, (el) => el.child(button(t, "t-create", L("Tạo phòng ban", "Create team"), (_e, cx) => { if (ok) cx.spawn(async (cx) => this.create(cx)); }, { solid: ok, hint: "↵" })))
-        .when(!!this.done && !!this.team, (el) => el.child(button(t, "t-board", L("Mở bảng việc", "Open board"), () => { openBoard(this.team); this.close(); }, { solid: true, icon: I("square-kanban") }))));
+        .when(!!this.done && !!this.team, (el) => el.child(button(t, "t-board", L("Mở bảng việc", "Open board"), () => { openBoard({ ...this.team, key: this.teamKey }); this.close(); }, { solid: true, icon: I("square-kanban") }))));
   }
 }

@@ -457,6 +457,19 @@ export function resumeArgv(x) {
 // What to type into that shell (Git Bash and PowerShell 7 both take it).
 export const resumeCommand = (x) => `${x.cd ? `cd '${x.cwd}' && ` : ""}${resumeArgv(x).join(" ")}`;
 
+// The department a pane or agent belongs to, with its key: the one that has it as a member, else the
+// one whose tab it is in, else its space's first (a space can hold several). A copy of team/model.js
+// deptOf (a mod cannot import another mod's files).
+export function deptOf(teams, { address, tab, space } = {}) {
+  const all = Object.entries(teams ?? {}).map(([key, t]) => ({ ...t, key }));
+  return all.find((t) => address && [t.lead, ...(t.members ?? [])].some((m) => m?.address === address))
+    ?? all.find((t) => tab && t.tab === tab)
+    ?? all.find((t) => space && (t.key === space || t.space === space)) ?? null;
+}
+// A department's board tab: its own "Bảng việc · <name>"; one kept under its space's id also owns the plain "Bảng việc".
+export const boardTab = (team, tabs) => tabs.find((x) => x.name === `Bảng việc · ${team.name}`.slice(0, 40))
+  ?? (team.key === team.space ? tabs.find((x) => x.name === "Bảng việc") : null);
+
 // A team member's record (role, agent, model, effort, and its start argv once the board kept it);
 // null for a terminal outside every department.
 export function teamMember(teams, address) {

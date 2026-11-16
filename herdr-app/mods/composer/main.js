@@ -12,7 +12,7 @@ import { agents, focused, spaces, panes, terminals, knownAgents, run, hc, exec, 
 import {
   kindOf, insertText, targetTerminal, altVTarget, summarize, tokens, span, ctxTone, ACTIONS, withCustom, actionsFor, actionState, shouldSend, resetLabel,
   MODELS, EFFORTS, MODES, modelKey, effortLabel, modeOf, pickTargets, bySpace, composerPx, withoutEnter,
-  lostSessions, resumeCommand, resumeKeys, atPrompt, teamSetup, teamMember, sessionKind, shellPrompt, routeMention,
+  lostSessions, resumeCommand, resumeKeys, atPrompt, teamSetup, teamMember, sessionKind, deptOf, boardTab, shellPrompt, routeMention,
   agentKind, parseCodexModels, parseAgyModels, modelsFor, effortsFor, modelCommand, effortCommand, codexFooter, agyFooter, currentModel,
   AGY_MODES, agyModeSteps, agyModeOf, CODEX_PERMS, codexStatus, agyUsage,
 } from "./model.js";
@@ -40,10 +40,9 @@ const agentOf = (address) => agents().find((a) => a.address === address) ?? null
 const autoTarget = () => targetTerminal({ agents: agents(), focused: focused() });
 const currentTargets = () => pickTargets(shared("composer.targets"), agents().map((a) => a.address), autoTarget());
 const where = (a) => (a ? `${a.space_name} · ${a.tab_name}` : "");
-// Its role in its space's department (shared "teams"), e.g. "Trưởng nhóm", "Review"; else null.
+// Its role in the department it belongs to (shared "teams"), e.g. "Trưởng nhóm", "Review"; else null.
 const teamRole = (a) => {
-  const team = a ? (shared("teams") ?? {})[a.space] : null;
-  const m = team && [team.lead, ...(team.members ?? [])].find((x) => x?.address === a.address);
+  const m = a ? teamMember(shared("teams"), a.address) : null;
   // The stored label is the creation-time language; the known roles follow the interface's.
   const name = { lead: L("Điều phối", "Coordinator"), "dev-b": L("DEV (hướng 2)", "DEV (2nd)"), research: L("Nghiên cứu", "Research"), scout: L("Trinh sát", "Scout") }[m?.role];
   return m ? name ?? m.label ?? m.role : null;
@@ -350,7 +349,8 @@ export default class Composer extends View {
   send(raw, cx) {
     // "@review …" with a department in this space goes to that teammate only (the text without the mention).
     const typed = raw; // what comes back into the box when nothing is sent
-    const team = (shared("teams") ?? {})[spaces().find((s) => s.active)?.id];
+    // The department of the target or of the tab in front (a space may hold several).
+    const team = deptOf(shared("teams"), { address: autoTarget(), tab: focused()?.tab, space: spaces().find((s) => s.active)?.id });
     const mention = routeMention(raw, team);
     const list = mention && agentOf(mention.address) ? [mention.address] : currentTargets();
     if (mention && agentOf(mention.address)) raw = mention.rest;
@@ -949,16 +949,15 @@ export default class Composer extends View {
       div().child(need ? L(`${need} cần bạn`, `${need} need you`) : `${all.length} agent${all.length === 1 ? "" : "s"}`),
     ], L("Các agent — bấm để chuyển tới", "Agents — click to jump to one"), this.pop === "agents", (el) => el.text_size(11.5).when(!!need, (x) => x.text_color(blocked ? t.blocked : t.done))), () => this.agentsMenu(t));
     // The space's department, when it has one: its members alive, a click opens it (Ctrl+Shift+D).
-    const dept = (shared("teams") ?? {})[space?.id];
+    const dept = deptOf(shared("teams"), { address: a?.address, tab: focused()?.tab, space: space?.id });
     const deptAlive = dept ? [dept.lead, ...dept.members].filter((m) => all.some((x) => x.address === m?.address)) : [];
     const teamChip = deptAlive.length ? this.chip(t, "c-team", [svg(ICON("layers")).size(12), div().child(L(`Phòng ban · ${deptAlive.length}`, `Team · ${deptAlive.length}`))],
       L(`Phòng ban "${dept.name}": mở Bảng việc (Ctrl+Shift+D: mọi phòng ban)`, `Team "${dept.name}": open the Board (Ctrl+Shift+D: all teams)`), false, (el) => el.text_size(11.5).on_click(() => {
-        // Straight to this space's board (the team mod's pane), opening it the first time.
+        // Straight to this department's own board, opening it the first time.
         const s = spaces().find((x) => x.id === dept.space) ?? spaces().find((x) => x.active);
-        const tabs = new Set((s?.tabs ?? []).map((x) => x.id));
-        const pane = panes().find((p) => p.mod === "team" && tabs.has(p.tab));
-        if (pane) run("tab.select", { id: pane.tab });
-        else if (s) run("tab.new", { space: s.id, name: L("Bảng việc", "Board"), mod: "team", props: { view: "board", space: s.id } });
+        const tab = s && boardTab(dept, s.tabs ?? []);
+        if (tab) run("tab.select", { id: tab.id });
+        else if (s) run("tab.new", { space: s.id, name: `Bảng việc · ${dept.name}`.slice(0, 40), mod: "team", props: { view: "board", space: s.id, team: dept.key } });
       })) : null;
     const right = [];
     if (a) right.push(this.popover("actions", this.chip(t, "c-actions", [svg(ICON("layers")).size(12), div().child(L("Thao tác", "Actions"))], "Commit, PR, test, review…", this.pop === "actions"), () => this.actionsMenu(t, terminal), "bottom_right"));

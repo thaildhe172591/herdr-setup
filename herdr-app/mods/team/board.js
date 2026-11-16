@@ -6,7 +6,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
 import { spaces, panes, agents, terminals, run, hc, exec, theme, settings, shared, setShared, props, openOverlay, appHome, home, readTextFile, writeTextFile, watchFolder } from "herdr";
 import * as fsp from "fs/promises";
-import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt, memberArgv, withResume, sessionKind, typedArgv } from "./model.js";
+import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt, memberArgv, withResume, sessionKind, typedArgv, boardTabName, ownsPlainBoard } from "./model.js";
 import { I, CHROME, PACE_ICON, roleTone, logo, icon, button, iconButton, tile, openInCode } from "./ui.js";
 import { L } from "./i18n.js";
 
@@ -20,13 +20,15 @@ const sameDir = (a, b) => !!a && !!b && a.replace(/[\\/]+$/, "").toLowerCase() =
 // A department's space: the one it was made in, else (made again) the one in its folder.
 export const spaceOf = (team) => spaces().find((x) => x.id === team?.space) ?? spaces().find((x) => sameDir(place(x), team?.folder));
 
-// The space's department; else (the space was made again) the one working in its folder. One made
-// before teams had a folder gets the one the dialog would give it now.
-// `key` is where it is kept in shared "teams" (updateTeam writes back there).
+// The board's department: the one its tab was opened for (props.team, v.teamKey); else, for a board
+// opened before a space could hold several, the one kept under the space's id, else (the space was made
+// again) the one working in its folder. One made before teams had a folder gets the one the dialog would
+// give it now. `key` is where it is kept in shared "teams" (updateTeam writes back there).
 const teamOf = (v) => {
   const teams = shared("teams") ?? {};
   const s = spaces().find((x) => x.id === v.space?.id);
-  const key = teams[v.space?.id] ? v.space.id : Object.keys(teams).find((k) => sameDir(teams[k]?.folder, place(s)));
+  const key = v.teamKey && teams[v.teamKey] ? v.teamKey
+    : teams[v.space?.id] ? v.space.id : Object.keys(teams).find((k) => sameDir(teams[k]?.folder, place(s)));
   const team = key ? teams[key] : null;
   return team ? { ...team, key, home: team.home || `${appHome()}\\teams\\${teamSlug(team.name)}` } : null;
 };
@@ -228,15 +230,15 @@ const pad = (n) => String(n).padStart(2, "0");
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const newTeamDialog = () => openOverlay({ mod: "team", kind: "dialog", width: 560, height: 720, props: { fresh: true } });
 
-// Shows the space's board tab, opening it the first time.
+// Shows a department's own board tab ("Bảng việc · <name>"; a department kept under its space's id
+// also takes that space's plain "Bảng việc"), opening it the first time for that department alone.
 export function openBoard(team) {
   const s = spaceOf(team);
   if (!s) return;
-  const tabs = new Set(s.tabs.map((x) => x.id));
-  const pane = panes().find((p) => p.mod === "team" && tabs.has(p.tab));
+  const tab = s.tabs.find((x) => x.name === boardTabName(team)) ?? (ownsPlainBoard(team) ? s.tabs.find((x) => x.name === "Bảng việc") : null);
   run("space.select", { id: s.id });
-  if (pane) run("tab.select", { id: pane.tab });
-  else run("tab.new", { space: s.id, name: "Bảng việc", mod: "team", props: { view: "board", space: s.id } });
+  if (tab) run("tab.select", { id: tab.id });
+  else run("tab.new", { space: s.id, name: boardTabName(team), mod: "team", props: { view: "board", space: s.id, team: team.key } });
 }
 
 export function boardInit(v, cx) {

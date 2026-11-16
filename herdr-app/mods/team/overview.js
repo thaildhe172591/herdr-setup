@@ -56,7 +56,7 @@ export function overviewRender(v, cx) {
       .when(!!c?.approve, (el) => el.child(pill(L(`${c.approve} chờ duyệt`, `${c.approve} to approve`), t.ansi3)))
       .when(!!c?.doing, (el) => el.child(pill(L(`${c.doing} đang làm`, `${c.doing} in progress`), t.ansi4)))
       .child(alive ? pill(`${alive}/${all.length} agent`, t.ansi2) : div().flex_none().text_size(11).text_color(t.dim).child(c?.all ? L(`${c.done}/${c.all} xong`, `${c.done}/${c.all} done`) : L("đã dừng", "stopped")))
-      .when(!!space, (el) => el.child(button(t, `ov-board-${key}`, L("Bảng việc", "Board"), () => { openBoard(team); v.close(); }, { small: true, icon: I("square-kanban") })))
+      .when(!!space, (el) => el.child(button(t, `ov-board-${key}`, L("Bảng việc", "Board"), () => { openBoard({ ...team, key }); v.close(); }, { small: true, icon: I("square-kanban") })))
       .when(!alive, (el) => el.child(forget
         ? button(t, `ov-forget-${key}`, L("Bỏ khỏi danh sách?", "Remove from list?"), (_e, cx) => {
             const { [key]: _gone, ...rest } = shared("teams") ?? {};

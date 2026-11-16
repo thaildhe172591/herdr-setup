@@ -470,8 +470,8 @@ export default class Agents extends View {
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned || view.group === "project" || view.group === "none";
       // A department member reads as its role (Trưởng nhóm, Review…); the icon says Claude / Codex / Antigravity.
-      const team = (shared("teams") ?? {})[a.space];
-      const role = team && [team.lead, ...(team.members ?? [])].find((x) => x?.address === a.address);
+      // Its own department's record (a space may hold several).
+      const role = Object.values(shared("teams") ?? {}).flatMap((x) => [x?.lead, ...(x?.members ?? [])]).find((x) => x?.address === a.address);
       const name = role ? `${roleName(role)}${full ? ` · ${a.space_name}` : ""}`
         : full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       return h_flex()
