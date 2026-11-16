@@ -6,7 +6,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
 import { spaces, panes, agents, terminals, run, hc, exec, theme, settings, shared, setShared, props, openOverlay, appHome, home, readTextFile, writeTextFile, watchFolder } from "herdr";
 import * as fsp from "fs/promises";
-import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt, memberArgv, withResume, sessionKind, typedArgv, boardTabName, ownsPlainBoard } from "./model.js";
+import { AGENT_KINDS, ROLES, COLUMNS, MODELS, parseCard, nextCardId, newCardText, ago, callsOn, teamSlug, leadBrief, memberBrief, laneBrief, paceBrief, recentActivity, pendingQuestion, PACES, SIZES, STEPS, pacePath, stepIndex, parseHandoff, costSummary, relayText, LANE_CHECKS, handoffName, handoffNews, stopNews, reportedKeys, reportQuiet, busyScreen, housekeepingScreen, initTold, typeKeys, atPrompt, restartCommand, shellPrompt, memberArgv, withResume, sessionKind, typedArgv, boardTabName, ownsPlainBoard, APPROVALS } from "./model.js";
 import { I, CHROME, PACE_ICON, roleTone, logo, icon, button, iconButton, tile, openInCode } from "./ui.js";
 import { L } from "./i18n.js";
 
@@ -385,10 +385,11 @@ async function newCard(v, cx, title) {
   tell(v, cx, `Phiếu việc mới ${id}: "${title}" (${file}). Làm rõ với người dùng nếu cần, viết đủ phiếu rồi chia việc.`, L(`Đã tạo ${id} và nhắn Điều phối`, `Created ${id} and messaged the coordinator`));
 }
 
-function approve(v, cx, c) {
+// `how`: one of APPROVALS (commit and PR, commit only, no commit); the coordinator does just that.
+function approve(v, cx, c, how = APPROVALS[0]) {
   mark(v, c, "duyet");
   Object.assign(v, { sel: null, sheet: null });
-  tell(v, cx, `Người dùng duyệt ${c.id}: commit và tạo PR theo luật, rồi đặt status xong.`, L(`Đã gửi duyệt ${c.id}: Điều phối sẽ commit/PR rồi chuyển phiếu`, `Approval sent for ${c.id}: the coordinator will commit/PR, then move the task`), () => { delete v.sent[c.id]; });
+  tell(v, cx, how.tell(c.id), L(`Đã gửi duyệt ${c.id} (${how.label}): Điều phối sẽ làm rồi chuyển phiếu`, `Approval sent for ${c.id} (${how.label}): the coordinator will do it, then move the task`), () => { delete v.sent[c.id]; });
 }
 
 function startAsk(v, cx, kind, id = null) {
@@ -649,8 +650,8 @@ export function boardRender(v, cx) {
       .when(!!c.conflict, (el) => el.child(div().mt(5).px(6).py(3).rounded(7).bg(t.ansi3 + "1f").text_size(10.5).text_color(t.ansi3)
         .child(`⚠ ${L("trùng file", "overlaps")}: ${c.conflict}`)))
       .when(!!v.sent[c.id], (el) => el.child(sentChip(c)))
-      .when(c.status === "cho-duyet" && !v.sent[c.id], (el) => el.child(h_flex().gap(5).pt(7)
-        .child(button(t, `bk-ok-${c.id}`, L("Duyệt", "Approve"), (_e, cx) => approve(v, cx, c), { small: true, icon: CHROME("check") }))
+      .when(c.status === "cho-duyet" && !v.sent[c.id], (el) => el.child(h_flex().flex_wrap().gap(5).pt(7)
+        .children(APPROVALS.map((a, i) => button(t, `bk-ok-${a.id}-${c.id}`, a.label, (_e, cx) => approve(v, cx, c, a), { small: true, icon: i ? null : CHROME("check") })))
         .child(button(t, `bk-fix-${c.id}`, L("Sửa thêm", "Request changes"), (_e, cx) => startAsk(v, cx, "fix", c.id), { small: true }))));
   };
 
@@ -766,7 +767,8 @@ export function boardRender(v, cx) {
       .child(div().flex_1())
       .when(!!v.sent[c.id], (el) => el.child(sentChip(c)))
       .when(c.status !== "xong" && !v.sent[c.id], (el) => el.child(button(t, "bd-fix", L("Sửa thêm", "Request changes"), (_e, cx) => startAsk(v, cx, "fix", c.id))))
-      .when(c.status === "cho-duyet" && !v.sent[c.id], (el) => el.child(button(t, "bd-ok", L("Duyệt", "Approve"), (_e, cx) => approve(v, cx, c), { solid: true, icon: CHROME("check") }))));
+      .when(c.status === "cho-duyet" && !v.sent[c.id], (el) => el.children([...APPROVALS].reverse().map((a) =>
+        button(t, `bd-ok-${a.id}`, a.label, (_e, cx) => approve(v, cx, c, a), a.id === "pr" ? { solid: true, icon: CHROME("check") } : {})))));
   // While a card is open the whole board, toolbar too, sits behind a backdrop that keeps every
   // press and scroll from what's under it; a click on it closes the card. The card keeps its own
   // presses (selecting its text must not reach the backdrop).
