@@ -388,6 +388,21 @@ export function bySpace(agents, focused) {
   return [...groups.values()].sort((x, y) => (y.space === focused?.space) - (x.space === focused?.space));
 }
 
+// Agents grouped for the pickers: each department on its own, titled "<space> · <team>" (a space can hold
+// several, with the same roles), the space's other agents together; the shown space first, and in it the
+// department of the shown tab.
+export function byTeam(agents, focused, teams) {
+  const groups = new Map();
+  for (const a of agents ?? []) {
+    const d = deptOf(teams, { address: a.address });
+    const key = d ? `team:${d.key}` : `space:${a.space}`;
+    if (!groups.has(key)) groups.set(key, { key, space: a.space, tab: d?.tab ?? null, name: d ? `${a.space_name} · ${d.name}` : a.space_name, agents: [] });
+    groups.get(key).agents.push(a);
+  }
+  const rank = (g) => (g.space === focused?.space ? 2 : 0) + (g.tab && g.tab === focused?.tab ? 1 : 0);
+  return [...groups.values()].sort((x, y) => rank(y) - rank(x));
+}
+
 // The composer block's height: one text line by default, up to 6, plus the thumbnail row.
 export const composerPx = ({ lines, thumbs }) => 92 + (Math.min(6, Math.max(1, lines)) - 1) * 18 + (thumbs ? 70 : 0);
 

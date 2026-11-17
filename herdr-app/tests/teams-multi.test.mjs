@@ -43,3 +43,15 @@ test("board tabs: each department its own; only one kept under its space's id al
   assert.equal(composer.boardTab(web, tabs).id, "b");
   assert.equal(composer.boardTab(web, [{ id: "a", name: "Bảng việc" }]), null); // never another department's board
 });
+
+test("byTeam: the picker splits a space's two departments (same roles) and puts the shown tab's first", () => {
+  const ags = [
+    { address: "t28", space: "sp1", space_name: "Repo", tab: "tbA" }, { address: "t1p", space: "sp1", space_name: "Repo", tab: "tbB" },
+    { address: "t2c", space: "sp1", space_name: "Repo", tab: "tbA" }, { address: "t9", space: "sp1", space_name: "Repo", tab: "tbC" },
+    { address: "t7", space: "sp2", space_name: "Other", tab: "tbD" },
+  ];
+  const g = composer.byTeam(ags, { space: "sp1", tab: "tbB" }, teams);
+  assert.deepEqual(g.map((x) => [x.name, x.agents.map((a) => a.address)]), [
+    ["Repo · Web Admin", ["t1p"]], ["Repo · Zalo Mini App", ["t28", "t2c"]], ["Repo", ["t9"]], ["Other", ["t7"]]]);
+  assert.deepEqual(composer.byTeam([], {}, teams), []);
+});

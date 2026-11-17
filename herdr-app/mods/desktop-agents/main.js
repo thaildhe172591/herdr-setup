@@ -214,7 +214,7 @@ export default class Agents extends View {
     const isClaude = (a?.app ?? term?.agent) === "claude-code";
     const name = a ? `${a.space_name} · ${a.title || a.tab_name || a.program?.name || addr}` : term?.name || term?.program?.name || addr;
     const toComposer = (kind) => {
-      setShared("composer.targets", [addr]);
+      setShared("composer.targets", { pick: [addr], at: Date.now() }); // stamped: picking the same agent again still reaches the composer
       if (kind) setShared("composer.do", { kind, terminal: addr, at: Date.now() });
       run("composer.focus");
       close();

@@ -11,7 +11,7 @@ import { v_flex, h_flex, TextareaState, Textarea, Popover, Scrollbar } from "gpu
 import { agents, focused, spaces, panes, terminals, knownAgents, run, hc, exec, theme, appHome, home, shared, setShared, nextCommand, pickFolder, props, openOverlay, closeOverlay, readTextFile, writeTextFile } from "herdr";
 import {
   kindOf, insertText, targetTerminal, altVTarget, summarize, tokens, span, ctxTone, ACTIONS, withCustom, actionsFor, actionState, shouldSend, resetLabel,
-  MODELS, EFFORTS, MODES, modelKey, effortLabel, modeOf, pickTargets, bySpace, composerPx, withoutEnter,
+  MODELS, EFFORTS, MODES, modelKey, effortLabel, modeOf, pickTargets, byTeam, composerPx, withoutEnter,
   lostSessions, resumeCommand, resumeKeys, atPrompt, teamSetup, teamMember, sessionKind, deptOf, boardTab, shellPrompt, routeMention,
   agentKind, parseCodexModels, parseAgyModels, modelsFor, effortsFor, modelCommand, effortCommand, codexFooter, agyFooter, currentModel,
   AGY_MODES, agyModeSteps, agyModeOf, CODEX_PERMS, codexStatus, agyUsage,
@@ -38,7 +38,15 @@ const POPS = ["plus", "target", "agents", "actions", "model", "mode", "ctx", "pe
 
 const agentOf = (address) => agents().find((a) => a.address === address) ?? null;
 const autoTarget = () => targetTerminal({ agents: agents(), focused: focused() });
-const currentTargets = () => pickTargets(shared("composer.targets"), agents().map((a) => a.address), autoTarget());
+// The picked targets live here: a shared write re-renders every mod, which made each tick in "Send to" lag.
+// The agents list still hands one over through shared "composer.targets", taken over whenever it changes.
+let picks = null, picksSeen;
+const pickedTargets = () => {
+  const s = shared("composer.targets") ?? null, k = JSON.stringify(s); // {pick, at} from the agents list (older: an array)
+  if (k !== picksSeen) { picksSeen = k; picks = Array.isArray(s) ? s : s?.pick ?? null; }
+  return picks ?? [];
+};
+const currentTargets = () => pickTargets(pickedTargets(), agents().map((a) => a.address), autoTarget());
 const where = (a) => (a ? `${a.space_name} · ${a.tab_name}` : "");
 // Its role in the department it belongs to (shared "teams"), e.g. "Trưởng nhóm", "Review"; else null.
 const teamRole = (a) => {
@@ -562,7 +570,7 @@ export default class Composer extends View {
   // A list that scrolls inside a menu: a box of definite height (as tall as its rows, at most `cap`)
   // with the scrolling list inside; max_h + overflow on the list itself never scrolled in a popover.
   scroll(id, cap, kids) {
-    const g = bySpace(agents(), focused());
+    const g = byTeam(agents(), focused(), shared("teams"));
     const h = Math.min(cap, g.reduce((n, x) => n + 26 + x.agents.length * 36, 4));
     return div().relative().w_full().h(Math.max(40, h)).flex_none()
       .child(v_flex().id(id).absolute().inset_0().overflow_y_scroll().gap(2).children(kids));
@@ -571,19 +579,20 @@ export default class Composer extends View {
   // Which agent, at a glance: its icon (Claude / Codex / Antigravity), its role in a department or
   // its own name, then kind · state; the space is the group header above.
   agentRow(t, a, o) {
+    const role = teamRole(a);
     return h_flex().id(`${o.id}-${a.address}`).min_h(36).px(10).gap(9).items_center().rounded(8).cursor_pointer()
       .hover((x) => x.bg(t.hover)).on_click(o.act)
       .when(!!o.left, (el) => el.child(o.left))
       .child(div().relative().flex_none().child(programIcon(a.program, 16, t.muted))
         .child(div().absolute().right(-2).bottom(-2).size(7).rounded(4).border_1().border_color(t.popover).bg(t[a.status] ?? t.dim)))
       .child(v_flex().flex_1().min_w(0)
-        .child(div().truncate().child(teamRole(a) ?? shortName(a)))
-        .child(div().truncate().text_size(11).text_color(t.dim).child(`${a.program?.name ?? a.app ?? "agent"} · ${STATUS_LABEL()[a.status] ?? a.status ?? ""}${teamRole(a) ? ` · ${a.address}` : ""}`)))
+        .child(div().truncate().child(role ?? shortName(a)))
+        .child(div().truncate().text_size(11).text_color(t.dim).child(`${a.program?.name ?? a.app ?? "agent"} · ${STATUS_LABEL()[a.status] ?? a.status ?? ""}${role ? ` · ${a.address}` : ""}`)))
       .when(a.tab === focused()?.tab, (el) => el.child(div().text_size(10.5).text_color(t.dim).child(L("đang xem", "viewing"))));
   }
 
   groups(t, rows) {
-    const g = bySpace(agents(), focused());
+    const g = byTeam(agents(), focused(), shared("teams"));
     if (!g.length) return [div().px(10).py(8).text_color(t.dim).child(L("Chưa có agent nào đang chạy.", "No agents running."))];
     return g.map((x) => v_flex().gap(1)
       .child(div().px(10).pt(6).pb(2).text_size(11).font_semibold().text_color(t.dim).child(x.name))
@@ -592,19 +601,20 @@ export default class Composer extends View {
 
   targetMenu(t) {
     this.digits = null;
-    const picked = (shared("composer.targets") ?? []).filter((a) => agentOf(a));
-    const toggle = (address) => {
+    const picked = pickedTargets().filter((a) => agentOf(a));
+    const toggle = (address, cx) => {
       const next = picked.includes(address) ? picked.filter((x) => x !== address) : [...picked, address];
-      setShared("composer.targets", next.length ? next : null);
+      picks = next.length ? next : null;
+      cx?.notify();
     };
     const box = (on) => h_flex().size(16).flex_none().items_center().justify_center().rounded(4).border_1()
       .border_color(on ? t.accent : t.input).when(on, (el) => el.bg(t.accent).child(svg(ICON("check")).size(11).text_color(t.accent_foreground)));
     return this.card(t, 330, [
       this.header(t, L("Gửi tới", "Send to"), picked.length > 1 ? L(`${picked.length} agent`, `${picked.length} agents`) : null),
-      this.item(t, "t-auto", { label: L("Tự động", "Auto"), desc: L("Agent của tab đang xem (tab terminal: Claude của space)", "The shown tab's agent (terminal tab: the space's Claude)"), on: !picked.length, act: () => setShared("composer.targets", null) }),
+      this.item(t, "t-auto", { label: L("Tự động", "Auto"), desc: L("Agent của tab đang xem (tab terminal: Claude của space)", "The shown tab's agent (terminal tab: the space's Claude)"), on: !picked.length, act: (cx) => { picks = null; cx?.notify(); } }),
       this.sep(t),
-      this.scroll("t-list", 300, this.groups(t, (a) => this.agentRow(t, a, { id: "t", left: box(picked.includes(a.address)), act: () => toggle(a.address) }))),
-      div().px(10).pt(6).pb(4).text_size(11).text_color(t.dim).child(L("Chọn nhiều agent ở nhiều space để gửi một tin cho tất cả.", "Pick several agents across spaces to send one message to all.")),
+      this.scroll("t-list", 300, this.groups(t, (a) => this.agentRow(t, a, { id: "t", left: box(picked.includes(a.address)), act: (_e, cx) => toggle(a.address, cx) }))),
+      div().px(10).pt(6).pb(4).text_size(11).text_color(t.dim).child(L("Chọn nhiều agent ở nhiều space, nhiều phòng ban để gửi một tin cho tất cả.", "Pick several agents across spaces and teams to send one message to all.")),
     ]);
   }
 
@@ -884,7 +894,7 @@ export default class Composer extends View {
     const list = currentTargets();
     const terminal = list[0];
     const a = agentOf(terminal);
-    const picked = (shared("composer.targets") ?? []).filter((x) => agentOf(x)).length > 0;
+    const picked = pickedTargets().filter((x) => agentOf(x)).length > 0;
     const s = terminal && this.status?.terminal === terminal ? this.status.sum : null;
     const isClaude = a?.app === "claude-code";
     const all = agents();
