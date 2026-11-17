@@ -130,8 +130,9 @@ export default class Composer extends View {
     const poll = (cx) => cx.spawn(async (cx) => { this.watchEnded(); if (await this.readStatus()) cx.notify(); });
     poll(cx);
     cx.timer.every(4000, poll);
-    // Agent sessions (Claude, Codex, Antigravity) lost to a reboot come back in their panes (twice: terminals may list late).
-    for (const ms of [2500, 15000]) cx.timer.after(ms, (cx) => cx.spawn(async (cx) => { await this.resumeLost(cx); cx.notify(); }));
+    // Agent sessions (Claude, Codex, Antigravity) lost to a reboot come back in their panes (a few passes:
+    // terminals may list late, and an agent's command can be missing for a while, see resumeLost).
+    for (const ms of [2500, 15000, 35000]) cx.timer.after(ms, (cx) => cx.spawn(async (cx) => { await this.resumeLost(cx); cx.notify(); }));
     // A resume that didn't bring Claude back gets one more try a minute later (lostSessions).
     cx.timer.every(60000, (cx) => cx.spawn(async (cx) => { await this.resumeLost(cx); cx.notify(); }));
     this.show();
@@ -208,6 +209,10 @@ export default class Composer extends View {
         // herdr-core reports the shell in front even while an agent runs in it: the screen decides too.
         const screen = await hc(["read", x.terminal]).catch(() => null);
         if (screen?.code !== 0 || !shellPrompt(screen.stdout)) continue;
+        // The agent's command must be there: the first resumed Claude starts Claude Code's npm auto-update, which
+        // removes the `claude` shim for ~15 s, and a resume typed then fails "command not found". Not counted as
+        // a try: a later pass types it once the command is back.
+        if ((await exec("where", [x.kind ?? "claude"]).catch(() => null))?.code !== 0) continue;
         // A team member resumes with its role's flags: the start argv the board kept, else model and effort.
         const member = teamMember(shared("teams"), x.terminal);
         if (member) Object.assign(x, teamSetup(shared("teams"), x.terminal), { member: true },
