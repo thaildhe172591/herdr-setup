@@ -19,6 +19,11 @@ import {
 
 const DIR = () => `${appHome()}\\attachments`;
 const SCRIPT = (n) => `${appHome()}\\mods\\composer\\${n}`;
+// Clipboard images go through clip-image.cs, built once with the .NET Framework compiler every Windows has:
+// ~0.2 s a paste against ~0.7 s for Windows PowerShell's start (clip-image.ps1 stays the fallback). The number
+// in the name changes with the source, so an edited helper is built again.
+const CLIP_EXE = () => `${home()}\\AppData\\Local\\herdr-mods\\clip-image-1.exe`;
+const CSC = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe";
 const ICON = (n) => `mods/workspace-chrome/${n}.svg`;
 // Codex's /status names a permission like its /permissions picker ("Read Only", "Approve for me").
 const PERM_NAMES = { ask: "ask for approval", approve: "approve for me", full: "full access", readonly: "read only" };
@@ -69,6 +74,7 @@ export default class Composer extends View {
   init(_props, cx) {
     setLang(shared("lang"));
     if (props()?.view) return; // the image-view window draws only
+    cx.spawn(async () => { this.clipExe = await this.buildClipHelper(); });
     this.items = [];
     this.status = null; // {terminal, sum, at}: the first target's status line data
     this.mode = {}; // terminal → permission mode read from its screen
@@ -330,8 +336,18 @@ export default class Composer extends View {
     return seen() !== before;
   }
 
+  // The helper exe, built when missing (it answers 2 without a folder: so it runs); null when it can't be.
+  async buildClipHelper() {
+    const exe = CLIP_EXE();
+    if (await exec(exe, [], { timeout: 10000 }).then(() => true, () => false)) return exe;
+    await exec("cmd", ["/c", "mkdir", exe.slice(0, exe.lastIndexOf("\\"))]).catch(() => {});
+    const r = await exec(CSC, ["-nologo", "-optimize", "-target:exe", `-out:${exe}`, "-r:System.Windows.Forms.dll", "-r:System.Drawing.dll", SCRIPT("clip-image.cs")], { timeout: 60000 }).catch(() => null);
+    return r?.code === 0 ? exe : null;
+  }
+
   async paste(fromKey) {
-    const r = await exec("powershell.exe", ["-STA", "-NoProfile", "-File", SCRIPT("clip-image.ps1"), DIR()], { timeout: 15000 });
+    const helped = this.clipExe ? await exec(this.clipExe, [DIR()], { timeout: 15000 }).catch(() => null) : null;
+    const r = helped?.code === 0 ? helped : await exec("powershell.exe", ["-STA", "-NoProfile", "-File", SCRIPT("clip-image.ps1"), DIR()], { timeout: 15000 });
     const saved = r.code === 0 ? lines(r.stdout) : [];
     if (!saved.length) {
       // Alt+V with no image: the pane in focus gets it, as if the composer weren't there.
